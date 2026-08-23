@@ -11,13 +11,15 @@ from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, Callb
 BOT_TOKEN = '8965425942:AAHnuuR61iu5B_W31k9yIxllNdPWWt12vIE'
 ADMIN_ID = 8384547912
 
-# ព័ត៌មាន KHQR ធនាគារ ABA
 BAKONG_ACCOUNT = 'chathea_noch@abab'
 MERCHANT_NAME = 'CHATHEA NOCH'
 MERCHANT_CITY = 'Phnom Penh'
 
 STOCK_FILE = 'stock.json'
 USERS_FILE = 'users.json'
+
+PRICE_KH = 1.50
+PRICE_US = 2.00
 
 def load_data():
     stock_data = {"via_kh": [], "via_us": []}
@@ -47,7 +49,6 @@ all_users = set(int(k) for k in user_balances.keys())
 admin_state = {}
 user_state = {}
 
-# Check Facebook UID Status (Live / Die)
 async def check_fb_uid_status(uid: str) -> bool:
     clean_uid = uid.strip().split('|')[0].split(':')[0]
     url = f"https://graph.facebook.com/{clean_uid}/picture?type=normal"
@@ -64,7 +65,6 @@ async def check_fb_uid_status(uid: str) -> bool:
     except Exception:
         return False
 
-# KHQR EMVCo Checksum
 def crc16_ccitt(data: str) -> str:
     crc = 0xFFFF
     for byte in data.encode('utf-8'):
@@ -110,8 +110,8 @@ def get_user_keyboard():
 
 def get_buy_inline_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"🇰🇭 FB Via Cambodia ($1.50) [សល់: {len(stock.get('via_kh', []))}]", callback_data='buy_via_kh')],
-        [InlineKeyboardButton(f"🇺🇸 FB Via USA ($2.00) [សល់: {len(stock.get('via_us', []))}]", callback_data='buy_via_us')]
+        [InlineKeyboardButton(f"🇰🇭 FB Via Cambodia (${PRICE_KH:.2f}) [សល់: {len(stock.get('via_kh', []))}]", callback_data='select_buy_kh')],
+        [InlineKeyboardButton(f"🇺🇸 FB Via USA (${PRICE_US:.2f}) [សល់: {len(stock.get('via_us', []))}]", callback_data='select_buy_us')]
     ])
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -122,19 +122,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_balances[uid_str] = 0.0
         save_data()
     await update.message.reply_text(
-        f"👋 សួស្តី **{user.first_name}**!\n\nសូមស្វាគមន៍មកកាន់ប្រព័ន្ធទិញ-លក់ និងពិនិត្យអាខោន Facebook ស្វ័យប្រវត្តិ។\nសូមជ្រើសរើសមុខងារពីប៊ូតុងខាងក្រោម៖",
+        f"👋 សួស្តី **{user.first_name}**!\n\nសូមស្វាគមន៍មកកាន់ប្រព័ន្ធទិញ-លក់ និងពិនិត្យអាខោន Facebook ស្វ័យប្រវត្តិ។",
         parse_mode='Markdown',
         reply_markup=get_user_keyboard()
     )
 
-# ផ្ទាំង Admin Control Panel (វាយ /admin)
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     keyboard = [
         [InlineKeyboardButton("👥 ចំនួនភ្ញៀវប្រើប្រាស់", callback_data='adm_users'), InlineKeyboardButton("📦 ឆែកមើលស្តុក", callback_data='adm_stock')],
         [InlineKeyboardButton("➕ ដាក់ស្តុក FB KH", callback_data='adm_add_kh'), InlineKeyboardButton("➕ ដាក់ស្តុក FB US", callback_data='adm_add_us')],
-        [InlineKeyboardButton("💵 បញ្ចូលលុយឱ្យ User", callback_data='adm_manual_deposit'), InlineKeyboardButton("🔍 ឆែកសម្អាតស្តុក (Auto Filter)", callback_data='adm_clean_stock')]
+        [InlineKeyboardButton("💵 បញ្ចូលលុយឱ្យ User", callback_data='adm_manual_deposit'), InlineKeyboardButton("🔍 ឆែកសម្អាតស្តុក", callback_data='adm_clean_stock')]
     ]
     await update.message.reply_text("👑 **ផ្ទាំងគ្រប់គ្រង ADMIN (Control Panel)**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -168,10 +167,10 @@ async def handle_admin_callbacks(update: Update, context: ContextTypes.DEFAULT_T
         await query.message.reply_text(f"✅ **សម្អាតស្តុករួចរាល់!**\n\n🇰🇭 KH Live សល់: {len(live_kh)}\n🇺🇸 US Live សល់: {len(live_us)}")
     elif data == 'adm_add_kh':
         admin_state[ADMIN_ID] = 'WAIT_STOCK_KH'
-        await query.edit_message_text("✍️ សូមផ្ញើទិន្នន័យអាខោន **FB KH** ចូល Chat នេះ (ទម្រង់ UID|Pass|2FA អាចដាក់ម្ដងច្រើនបន្ទាត់):")
+        await query.edit_message_text("✍️ សូមផ្ញើទិន្នន័យអាខោន **FB KH** ចូល Chat នេះ (ទម្រង់ UID|Pass|2FA):")
     elif data == 'adm_add_us':
         admin_state[ADMIN_ID] = 'WAIT_STOCK_US'
-        await query.edit_message_text("✍️ សូមផ្ញើទិន្នន័យអាខោន **FB US** ចូល Chat នេះ (ទម្រង់ UID|Pass|2FA អាចដាក់ម្ដងច្រើនបន្ទាត់):")
+        await query.edit_message_text("✍️ សូមផ្ញើទិន្នន័យអាខោន **FB US** ចូល Chat នេះ (ទម្រង់ UID|Pass|2FA):")
     elif data == 'adm_manual_deposit':
         admin_state[ADMIN_ID] = 'WAIT_DEPOSIT_FORMAT'
         await query.edit_message_text("✍️ សូមវាយតាមទម្រង់:\n`ID ចំនួនលុយ`\n\nឧទាហរណ៍៖ `8276069267 5`", parse_mode='Markdown')
@@ -182,6 +181,26 @@ async def show_buy_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown',
         reply_markup=get_buy_inline_keyboard()
     )
+
+# ជ្រើសរើសប្រភេទរួចសួរចំនួន
+async def select_buy_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+    cat = query.data.replace('select_buy_', '')
+    await query.answer()
+
+    if cat == 'kh':
+        available = len(stock.get('via_kh', []))
+        if available == 0:
+            return await query.answer("❌ ស្តុក FB Via Cambodia អស់ហើយ!", show_alert=True)
+        user_state[user_id] = 'WAIT_BUY_QTY_KH'
+        await query.message.reply_text(f"🇰🇭 **FB Via Cambodia** (${PRICE_KH:.2f}/Account)\n📦 ស្តុកនៅសល់: **{available}** អាខោន\n\n✍️ **សូមវាយបញ្ចូលចំនួនអាខោនដែលអ្នកចង់ទិញ (ឧទាហរណ៍៖ 1, 2, 5):**", parse_mode='Markdown')
+    elif cat == 'us':
+        available = len(stock.get('via_us', []))
+        if available == 0:
+            return await query.answer("❌ ស្តុក FB Via USA អស់ហើយ!", show_alert=True)
+        user_state[user_id] = 'WAIT_BUY_QTY_US'
+        await query.message.reply_text(f"🇺🇸 **FB Via USA** (${PRICE_US:.2f}/Account)\n📦 ស្តុកនៅសល់: **{available}** អាខោន\n\n✍️ **សូមវាយបញ្ចូលចំនួនអាខោនដែលអ្នកចង់ទិញ (ឧទាហរណ៍៖ 1, 2, 5):**", parse_mode='Markdown')
 
 async def show_deposit_qr(update: Update, context: ContextTypes.DEFAULT_TYPE):
     khqr_data = generate_khqr_string(BAKONG_ACCOUNT, MERCHANT_NAME, MERCHANT_CITY)
@@ -209,51 +228,6 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📞 **ផ្នែកបម្រើអតិថិជន:**\nសូមទាក់ទង Admin ផ្ទាល់ សម្រាប់ការសាកសួរព័ត៌មានបន្ថែម។")
 
-async def buy_via_kh(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    uid_str = str(query.from_user.id)
-    price = 1.50
-    balance = user_balances.get(uid_str, 0.0)
-
-    if not stock.get("via_kh"):
-        return await query.answer("❌ ស្តុក FB Via KH អស់ហើយ!", show_alert=True)
-    if balance < price:
-        return await query.answer(f"❌ សមតុល្យមិនគ្រប់គ្រាន់! (${balance:.2f} / ${price:.2f})", show_alert=True)
-
-    user_balances[uid_str] -= price
-    account = stock["via_kh"].pop(0)
-    save_data()
-    
-    await query.answer("🎉 ទិញបានជោគជ័យ!")
-    await context.bot.send_message(chat_id=int(uid_str), text=f"🎉 **ការទិញបានជោគជ័យ!**\n\n📦 ប្រភេទ: FB Via Cambodia\n📋 ទិន្នន័យ:\n`{account}`", parse_mode='Markdown')
-    try:
-        await query.edit_message_reply_markup(reply_markup=get_buy_inline_keyboard())
-    except Exception:
-        pass
-
-async def buy_via_us(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    uid_str = str(query.from_user.id)
-    price = 2.00
-    balance = user_balances.get(uid_str, 0.0)
-
-    if not stock.get("via_us"):
-        return await query.answer("❌ ស្តុក FB Via US អស់ហើយ!", show_alert=True)
-    if balance < price:
-        return await query.answer(f"❌ សមតុល្យមិនគ្រប់គ្រាន់! (${balance:.2f} / ${price:.2f})", show_alert=True)
-
-    user_balances[uid_str] -= price
-    account = stock["via_us"].pop(0)
-    save_data()
-    
-    await query.answer("🎉 ទិញបានជោគជ័យ!")
-    await context.bot.send_message(chat_id=int(uid_str), text=f"🎉 **ការទិញបានជោគជ័យ!**\n\n📦 ប្រភេទ: FB Via USA\n📋 ទិន្នន័យ:\n`{account}`", parse_mode='Markdown')
-    try:
-        await query.edit_message_reply_markup(reply_markup=get_buy_inline_keyboard())
-    except Exception:
-        pass
-
-# ទទួល Slip វិក្កយបត្រពីភ្ញៀវ
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     photo = update.message.photo[-1]
@@ -265,7 +239,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await context.bot.send_photo(chat_id=ADMIN_ID, photo=photo.file_id, caption=f"📥 សំណើបញ្ចូលលុយពី {user_name} (`{user.id}`)", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
 
-# Admin ចុច Approve / Reject
 async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data.split('_')
@@ -286,6 +259,7 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    uid_str = str(user_id)
     text = update.message.text.strip()
     all_users.add(user_id)
 
@@ -300,6 +274,42 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     elif text == "🔍 ឆែក Live/Die FB":
         user_state[user_id] = 'WAIT_CHECK_UID'
         return await update.message.reply_text("✍️ សូមផ្ញើ **UID** ឬបញ្ជីអាខោន FB ដែលចង់ Check ចូល Chat នេះ (អាចដាក់ម្ដងច្រើនបន្ទាត់):")
+
+    # ដំណើរការទិញតាមចំនួនដែលភ្ញៀវវាយបញ្ចូល
+    if user_id in user_state and user_state[user_id].startswith('WAIT_BUY_QTY_'):
+        cat = 'via_kh' if user_state[user_id] == 'WAIT_BUY_QTY_KH' else 'via_us'
+        price_each = PRICE_KH if cat == 'via_kh' else PRICE_US
+        cat_name = "FB Via Cambodia" if cat == 'via_kh' else "FB Via USA"
+        del user_state[user_id]
+
+        if not text.isdigit() or int(text) <= 0:
+            return await update.message.reply_text("❌ សូមវាយបញ្ចូលតែចំនួនលេខគត់វិជ្ជមានប៉ុណ្ណោះ (ឧទាហរណ៍៖ 1, 2, 5)!")
+        
+        qty = int(text)
+        available = len(stock.get(cat, []))
+        if qty > available:
+            return await update.message.reply_text(f"❌ ចំនួនដែលអ្នកចង់ទិញ ({qty}) ច្រើនជាងស្តុកដែលនៅសល់ ({available})!")
+
+        total_price = qty * price_each
+        balance = user_balances.get(uid_str, 0.0)
+        if balance < total_price:
+            return await update.message.reply_text(f"❌ សមតុល្យមិនគ្រប់គ្រាន់!\n💰 តម្លៃសរុប: **${total_price:.2f}**\n💵 សមតុល្យរបស់អ្នក: **${balance:.2f}**\n\n👉 សូមបញ្ចូលលុយជាមុនសិន។", parse_mode='Markdown')
+
+        # កាត់លុយ និងដក Stock ចេញ
+        user_balances[uid_str] -= total_price
+        delivered_accounts = [stock[cat].pop(0) for _ in range(qty)]
+        save_data()
+
+        acc_text = "\n".join([f"`{acc}`" for acc in delivered_accounts])
+        msg = (
+            f"🎉 **ការទិញបានជោគជ័យ!**\n\n"
+            f"📦 ប្រភេទ: **{cat_name}**\n"
+            f"🔢 ចំនួន: **{qty} អាខោន**\n"
+            f"💰 តម្លៃសរុប: **${total_price:.2f}**\n"
+            f"💵 សមតុល្យនៅសល់: **${user_balances[uid_str]:.2f}**\n\n"
+            f"📋 **បញ្ជីទិន្នន័យអាខោន:**\n{acc_text}"
+        )
+        return await update.message.reply_text(msg, parse_mode='Markdown')
 
     if user_id in user_state and user_state[user_id] == 'WAIT_CHECK_UID':
         del user_state[user_id]
@@ -363,8 +373,7 @@ async def main():
     bot_app.add_handler(CommandHandler("admin", admin_command))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
     bot_app.add_handler(CallbackQueryHandler(handle_admin_callbacks, pattern='^adm_'))
-    bot_app.add_handler(CallbackQueryHandler(buy_via_kh, pattern='^buy_via_kh$'))
-    bot_app.add_handler(CallbackQueryHandler(buy_via_us, pattern='^buy_via_us$'))
+    bot_app.add_handler(CallbackQueryHandler(select_buy_category, pattern='^select_buy_'))
     bot_app.add_handler(CallbackQueryHandler(admin_actions, pattern='^(app|rej)_'))
     bot_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
@@ -373,7 +382,7 @@ async def main():
     await bot_app.start()
     await bot_app.updater.start_polling()
     
-    print("🚀 Bot is running completely with all features...")
+    print("🚀 Bot is running with Quantity Purchase Option...")
     while True:
         await asyncio.sleep(3600)
 
