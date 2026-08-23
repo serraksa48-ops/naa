@@ -8,7 +8,7 @@ from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboard
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
 BOT_TOKEN = '8965425942:AAHnuuR61iu5B_W31k9yIxllNdPWWt12vIE'
-ADMIN_ID = 8276069267
+ADMIN_ID = 8384547912
 
 # ព័ត៌មាន ABA KHQR
 BAKONG_ACCOUNT = 'chathea_noch@abab'
