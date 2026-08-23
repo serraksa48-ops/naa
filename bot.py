@@ -1,14 +1,18 @@
 import os
 import asyncio
+import io
+import qrcode
 from aiohttp import web
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
 BOT_TOKEN = '8965425942:AAHnuuR61iu5B_W31k9yIxllNdPWWt12vIE'
-ADMIN_ID = 8276069267
+ADMIN_ID = 8384547912
 
-# ឈ្មោះរូបភាព QR ដែល Upload លើ GitHub
-QR_IMAGE_FILENAME = 'aba_qr.jpg'
+# ព័ត៌មានគណនី ABA KHQR របស់អ្នក
+BAKONG_ACCOUNT = 'chathea_noch@abab'  # ឬលេខគណនី ABA
+MERCHANT_NAME = 'CHATHEA NOCH'
+MERCHANT_CITY = 'Phnom Penh'
 
 stock = {
     "via_kh": ["100081234567890|Pass123!|2FASECRETKEY1"],
@@ -17,7 +21,49 @@ stock = {
 
 user_balances = {}
 
-# Menu ប៊ូតុងចុចធំៗនៅខាងក្រោមអេក្រង់
+# មុខងារបង្កើត KHQR String តាមស្តង់ដារ EMVCo
+def crc16_ccitt(data: str) -> str:
+    crc = 0xFFFF
+    for byte in data.encode('utf-8'):
+        crc ^= (byte << 8)
+        for _ in range(8):
+            if crc & 0x8000:
+                crc = (crc << 1) ^ 0x1021
+            else:
+                crc <<= 1
+            crc &= 0xFFFF
+    return f"{crc:04X}"
+
+def generate_khqr_string(account_id: str, name: str, city: str, amount: float = None, currency: str = "USD") -> str:
+    def format_tag(tag: str, val: str) -> str:
+        return f"{tag}{len(val):02d}{val}"
+
+    # Tag 29: Merchant Account Information
+    sub_acc = format_tag("00", account_id)
+    tag_29 = format_tag("29", sub_acc)
+    
+    payload = (
+        format_tag("00", "01") +
+        format_tag("01", "12" if amount else "11") +
+        tag_29 +
+        format_tag("52", "0000") +
+        format_tag("53", "840" if currency == "USD" else "116")
+    )
+    
+    if amount:
+        payload += format_tag("54", f"{amount:.2f}")
+        
+    payload += (
+        format_tag("58", "KH") +
+        format_tag("59", name[:25]) +
+        format_tag("60", city[:15]) +
+        "6304"
+    )
+    
+    checksum = crc16_ccitt(payload)
+    return payload + checksum
+
+# Menu ប៊ូតុងខាងក្រោមអេក្រង់
 def get_bottom_keyboard():
     keyboard = [
         [KeyboardButton("🛒 ទិញអាខោន FB"), KeyboardButton("💳 បញ្ចូលលុយ (ស្កេន QR)")],
@@ -47,17 +93,30 @@ async def show_buy_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def show_deposit_qr(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # បង្កើត KHQR String និងបំលែងជារូបភាព QR
+    khqr_data = generate_khqr_string(BAKONG_ACCOUNT, MERCHANT_NAME, MERCHANT_CITY)
+    
+    qr = qrcode.QRCode(version=1, box_size=10, border=2)
+    qr.add_data(khqr_data)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    
+    bio = io.BytesIO()
+    img.save(bio, 'PNG')
+    bio.seek(0)
+    
     caption = (
-        "📲 **ស្កេន KHQR ដើម្បីបង់ប្រាក់តាម ABA App**\n\n"
-        "👤 ឈ្មោះ: `CHATHEA NOCH`\n"
-        "🏦 លេខគណនី: `019 088 273` / `019 088 270`\n\n"
+        "📲 **ស្កេន KHQR ដើម្បីបង់ប្រាក់តាម ABA Mobile**\n\n"
+        f"👤 ឈ្មោះ: `{MERCHANT_NAME}`\n"
+        f"🏦 គណនី: `019 088 273 / 019 088 270`\n\n"
         "⚠️ **ចំណាំ:** សូមផ្ទេរទឹកប្រាក់តាមតម្លៃដែលចង់បញ្ចូល រួច **Screenshot វិក្កយបត្រ** ផ្ញើចូល Chat នេះដើម្បី Admin បញ្ចូលលុយជូន។"
     )
-    try:
-        with open(QR_IMAGE_FILENAME, 'rb') as photo_file:
-            await update.message.reply_photo(photo=photo_file, caption=caption, parse_mode='Markdown')
-    except Exception:
-        await update.message.reply_text("⚠️ រូបភាព QR Code កំពុងរៀបចំ សូមព្យាយាមម្តងទៀត ឬទាក់ទង Admin។")
+    
+    await update.message.reply_photo(
+        photo=InputFile(bio, filename="khqr.png"),
+        caption=caption,
+        parse_mode='Markdown'
+    )
 
 async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -67,9 +126,8 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def show_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📞 **ផ្នែកបម្រើអតិថិជន:**\nសូមទាក់ទងមកកាន់ Admin ផ្ទាល់ សម្រាប់ការសាកសួរព័ត៌មានបន្ថែម។")
+    await update.message.reply_text("📞 **ផ្នែកបម្រើអតិថិជន:**\nសូមទាក់ទង Admin ផ្ទាល់ សម្រាប់ការសាកសួរព័ត៌មានបន្ថែម។")
 
-# Handler សម្រាប់ទិញអាខោន (Inline Callbacks)
 async def buy_via_kh(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
@@ -102,7 +160,6 @@ async def buy_via_us(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     await context.bot.send_message(chat_id=user_id, text=f"🎉 **ការទិញបានជោគជ័យ!**\n\n📦 FB Via USA\n📋 ទិន្នន័យ:\n`{account}`", parse_mode='Markdown')
 
-# ទទួលរូបភាពវិក្កយបត្រពីភ្ញៀវ
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     photo = update.message.photo[-1]
@@ -114,7 +171,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await context.bot.send_photo(chat_id=ADMIN_ID, photo=photo.file_id, caption=f"📥 សំណើបញ្ចូលលុយពី {user_name} (`{user.id}`)", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
 
-# Admin ចុច Approve / Reject
 async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data.split('_')
@@ -132,7 +188,6 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_caption(f"❌ បានបដិសេធសំណើ User: `{target_user_id}`")
         await context.bot.send_message(chat_id=target_user_id, text="❌ វិក្កយបត្រមិនត្រឹមត្រូវ។")
 
-# Handler ចាប់យកការចុចប៊ូតុងខាងក្រោមអេក្រង់
 async def handle_text_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if text == "🛒 ទិញអាខោន FB":
@@ -144,7 +199,6 @@ async def handle_text_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE
     elif text == "📞 ជំនួយ / Support":
         await show_support(update, context)
 
-# Web Server សម្រាប់ Render
 async def handle_ping(request):
     return web.Response(text="Bot is running active 24/7!")
 
@@ -160,11 +214,7 @@ async def run_web_server():
 async def main():
     bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
     bot_app.add_handler(CommandHandler("start", start))
-    
-    # ចាប់យកអត្ថបទប៊ូតុងចុចខាងក្រោម
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_buttons))
-    
-    # Callbacks សម្រាប់ទិញ និង Admin Approve
     bot_app.add_handler(CallbackQueryHandler(buy_via_kh, pattern='^buy_via_kh$'))
     bot_app.add_handler(CallbackQueryHandler(buy_via_us, pattern='^buy_via_us$'))
     bot_app.add_handler(CallbackQueryHandler(admin_actions, pattern='^(app|rej)_'))
@@ -175,7 +225,7 @@ async def main():
     await bot_app.start()
     await bot_app.updater.start_polling()
     
-    print("🚀 Bot is running with Bottom Menu Keyboard...")
+    print("🚀 Bot is running KHQR Engine...")
     while True:
         await asyncio.sleep(3600)
 
