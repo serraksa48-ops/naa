@@ -1,13 +1,17 @@
 import os
 import asyncio
-import logging
+import io
+import qrcode
 from aiohttp import web
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
 BOT_TOKEN = '8965425942:AAHnuuR61iu5B_W31k9yIxllNdPWWt12vIE'
 ADMIN_ID = 8276069267
-ABA_PAY_LINK = 'https://link.payway.com.kh/ABAPAYQk505904o'
+
+# ℹ️ ដាក់លេខគណនី ABA របស់អ្នកនៅទីនេះ (ផ្អែកលើរូប Profile របស់អ្នកគឺ 10517445)
+ABA_ACCOUNT_NUMBER = '10517445'
+MERCHANT_NAME = 'CHATHEA NOCH'
 
 stock = {
     "via_kh": ["100081234567890|Pass123!|2FASECRETKEY1"],
@@ -19,7 +23,7 @@ user_balances = {}
 def get_main_menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🛒 ទិញអាខោន FB", callback_data='buy_menu')],
-        [InlineKeyboardButton("💳 បញ្ចូលលុយ (ABA)", callback_data='deposit'), InlineKeyboardButton("👤 គណនីខ្ញុំ", callback_data='my_profile')],
+        [InlineKeyboardButton("💳 បញ្ចូលលុយ (ស្កេន QR)", callback_data='deposit'), InlineKeyboardButton("👤 គណនីខ្ញុំ", callback_data='my_profile')],
         [InlineKeyboardButton("📞 ជំនួយ / Support", callback_data='support')]
     ])
 
@@ -80,12 +84,48 @@ async def my_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    text = "💳 **បញ្ចូលលុយតាម ABA**\n\n១. ចុច Link ខាងក្រោមដើម្បីផ្ទេរ\n២. Screenshot វិក្កយបត្រផ្ញើចូល Chat នេះ"
+    text = "💳 **សូមជ្រើសរើសចំនួនទឹកប្រាក់ដែលចង់បញ្ចូល:**"
     keyboard = [
-        [InlineKeyboardButton("📲 បើក ABA Mobile", url=ABA_PAY_LINK)],
+        [InlineKeyboardButton("💵 $1.00", callback_data='qr_1'), InlineKeyboardButton("💵 $2.00", callback_data='qr_2')],
+        [InlineKeyboardButton("💵 $5.00", callback_data='qr_5'), InlineKeyboardButton("💵 $10.00", callback_data='qr_10')],
         [InlineKeyboardButton("⬅️ ត្រឡប់ក្រោយ", callback_data='back_home')]
     ]
     await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def generate_qr_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    amount = query.data.split('_')[1]
+    
+    # បង្កើត Link សម្រាប់ទូទាត់ผ่าน ABA
+    pay_data = f"https://pay.ababank.com/pay?to={ABA_ACCOUNT_NUMBER}&amount={amount}&currency=USD"
+    
+    qr = qrcode.QRCode(version=1, box_size=10, border=2)
+    qr.add_data(pay_data)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    
+    bio = io.BytesIO()
+    img.save(bio, 'PNG')
+    bio.seek(0)
+    
+    caption = (
+        f"📲 **ស្កេន QR Code ដើម្បីបង់ប្រាក់**\n\n"
+        f"💰 ចំនួនទឹកប្រាក់: **${amount}.00 USD**\n"
+        f"🏦 ឈ្មោះ: `{MERCHANT_NAME}`\n"
+        f"🔢 លេខគណនី: `{ABA_ACCOUNT_NUMBER}`\n\n"
+        f"⚠️ បន្ទាប់ពីទូទាត់រួច សូម **Screenshot វិក្កយបត្រ** រួចផ្ញើរូបភាពចូល Chat នេះដើម្បី Admin ពិនិត្យបញ្ជីលុយជូន។"
+    )
+    
+    await query.message.delete()
+    await context.bot.send_photo(
+        chat_id=query.from_user.id,
+        photo=InputFile(bio, filename="qr.png"),
+        caption=caption,
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ ត្រឡប់ក្រោយ", callback_data='deposit')]])
+    )
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -125,7 +165,6 @@ async def back_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     await query.edit_message_text("🏠 សូមជ្រើសរើសមុខងារ:", reply_markup=get_main_menu())
 
-# Web Server សម្រាប់ Render (ការពារកុំឱ្យ Render បិទ Bot)
 async def handle_ping(request):
     return web.Response(text="Bot is running active 24/7!")
 
@@ -146,18 +185,18 @@ async def main():
     bot_app.add_handler(CallbackQueryHandler(buy_via_us, pattern='^buy_via_us$'))
     bot_app.add_handler(CallbackQueryHandler(my_profile, pattern='^my_profile$'))
     bot_app.add_handler(CallbackQueryHandler(deposit, pattern='^deposit$'))
+    bot_app.add_handler(CallbackQueryHandler(generate_qr_code, pattern='^qr_'))
     bot_app.add_handler(CallbackQueryHandler(support, pattern='^support$'))
     bot_app.add_handler(CallbackQueryHandler(back_home, pattern='^back_home$'))
     bot_app.add_handler(CallbackQueryHandler(admin_actions, pattern='^(app|rej)_'))
     bot_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
-    # បើកដំណើរការ Fake Web Server ជាមួយ Bot រួមគ្នា
     await run_web_server()
     await bot_app.initialize()
     await bot_app.start()
     await bot_app.updater.start_polling()
     
-    print("🚀 Bot is running with Web Server...")
+    print("🚀 Bot is running with QR Generator...")
     while True:
         await asyncio.sleep(3600)
 
